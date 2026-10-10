@@ -2,7 +2,6 @@ import ctypes
 import sys
 import os
 
-# ---------------------------------------------------------------- Win32 绑定
 GENERIC_READ = 0x80000000
 GENERIC_WRITE = 0x40000000
 FILE_SHARE_READ = 0x00000001
